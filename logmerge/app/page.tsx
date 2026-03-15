@@ -15,26 +15,62 @@ const ISO_REGEX =
 
 const ISO_EXAMPLE = "e.g. 2024-03-13T10:00:00.000Z or 2024-03-13 10:00:00.000Z";
 
+/** Split a line into columns (tab or comma separated) */
+function splitColumns(line: string): string[] {
+  return line.split(/[\t,]/).map((c) => c.trim());
+}
+
+/** Resolve datetime column spec to 0-based index. spec can be "0", "1", or a header name. */
+function resolveDatetimeColumnIndex(
+  lines: string[],
+  spec: string
+): { index: number; skipFirstLine: boolean } {
+  const trimmed = spec.trim();
+  const asNum = parseInt(trimmed, 10);
+  if (!Number.isNaN(asNum) && asNum >= 0) {
+    return { index: asNum, skipFirstLine: false };
+  }
+  if (lines.length === 0) return { index: 0, skipFirstLine: false };
+  const headerCols = splitColumns(lines[0]);
+  const nameIndex = headerCols.findIndex(
+    (c) => c.toLowerCase() === trimmed.toLowerCase()
+  );
+  if (nameIndex >= 0) {
+    return { index: nameIndex, skipFirstLine: true };
+  }
+  return { index: 0, skipFirstLine: false };
+}
+
 export type FormatError = {
   lineNumber: number;
   line: string;
   reason: "missing_timestamp" | "invalid_date";
 };
 
-export function validateLogLines(text: string): FormatError[] {
+export function validateLogLines(
+  text: string,
+  datetimeColumnSpec: string = "0"
+): FormatError[] {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return [];
+  const { index: colIndex, skipFirstLine } = resolveDatetimeColumnIndex(
+    lines,
+    datetimeColumnSpec
+  );
   const errors: FormatError[] = [];
-  lines.forEach((line, i) => {
-    const match = line.match(ISO_REGEX);
-    if (!match) {
+  const start = skipFirstLine ? 1 : 0;
+  for (let i = start; i < lines.length; i++) {
+    const line = lines[i];
+    const cols = splitColumns(line);
+    const timestamp = cols[colIndex];
+    if (timestamp === undefined || !timestamp) {
       errors.push({
         lineNumber: i + 1,
         line: line.slice(0, 50) + (line.length > 50 ? "…" : ""),
         reason: "missing_timestamp",
       });
-      return;
+      continue;
     }
-    const timestamp = match[0];
     const time = new Date(timestamp).getTime();
     if (Number.isNaN(time)) {
       errors.push({
@@ -43,7 +79,7 @@ export function validateLogLines(text: string): FormatError[] {
         reason: "invalid_date",
       });
     }
-  });
+  }
   return errors;
 }
 
@@ -61,24 +97,40 @@ function formatValidationMessage(errors: FormatError[]): string {
     .join(" ");
 }
 
-function parseLogLines(text: string, source: string): LogEntry[] {
+function parseLogLines(
+  text: string,
+  source: string,
+  datetimeColumnSpec: string = "0"
+): LogEntry[] {
   const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length === 0) return [];
+  const { index: colIndex, skipFirstLine } = resolveDatetimeColumnIndex(
+    lines,
+    datetimeColumnSpec
+  );
   const entries: LogEntry[] = [];
   let id = 0;
 
-  for (const line of lines) {
-    const match = line.match(ISO_REGEX);
-    if (!match) continue;
-    const timestamp = match[0];
+  for (let i = skipFirstLine ? 1 : 0; i < lines.length; i++) {
+    const line = lines[i];
+    const cols = splitColumns(line);
+    const timestamp = cols[colIndex];
+    if (timestamp === undefined || !timestamp) continue;
     const time = new Date(timestamp).getTime();
     if (Number.isNaN(time)) continue;
-    const payload = line.slice(match.index! + timestamp.length).trimStart();
+    const payload =
+      cols.length > 1
+        ? cols
+            .filter((_, j) => j !== colIndex)
+            .join("\t")
+            .trim() || line
+        : line;
     entries.push({
       id: `${source}-${id++}`,
       source,
       timestamp,
       time,
-      payload,
+      payload: payload || "—",
     });
   }
 
@@ -88,6 +140,7 @@ function parseLogLines(text: string, source: string): LogEntry[] {
 export default function Home() {
   const [sourceName, setSourceName] = useState("");
   const [pastedText, setPastedText] = useState("");
+  const [datetimeColumn, setDatetimeColumn] = useState("0");
   const [entries, setEntries] = useState<LogEntry[]>([]);
 
   const merged = useMemo(() => {
@@ -95,14 +148,17 @@ export default function Home() {
   }, [entries]);
 
   const formatErrors = useMemo(
-    () => (pastedText.trim() ? validateLogLines(pastedText) : []),
-    [pastedText]
+    () =>
+      pastedText.trim()
+        ? validateLogLines(pastedText, datetimeColumn)
+        : [],
+    [pastedText, datetimeColumn]
   );
   const formatErrorText = formatValidationMessage(formatErrors);
 
   function handleAddSource() {
     const name = sourceName.trim() || `Source ${entries.length + 1}`;
-    const newEntries = parseLogLines(pastedText, name);
+    const newEntries = parseLogLines(pastedText, name, datetimeColumn);
     setEntries((prev) => [...prev, ...newEntries]);
     setPastedText("");
     setSourceName("");
@@ -121,7 +177,7 @@ export default function Home() {
           Log merge
         </h1>
         <p className="mt-1 text-sm text-zinc-400">
-          Paste logs with ISO date/time in the first column; view merged by time.
+          Paste logs (tab or comma separated). Set which column has the date/time; list is sorted by it.
         </p>
       </header>
 
@@ -130,8 +186,22 @@ export default function Home() {
           <h2 className="mb-4 text-sm font-medium uppercase tracking-wider text-zinc-500">
             Add source
           </h2>
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-            <div className="flex-1 space-y-2">
+          <div className="mb-4 flex flex-wrap items-end gap-4 sm:gap-6">
+            <div className="w-40 space-y-2">
+              <label htmlFor="datetime-col" className="block text-sm text-zinc-400">
+                Datetime column
+              </label>
+              <input
+                id="datetime-col"
+                type="text"
+                placeholder="0 or name"
+                value={datetimeColumn}
+                onChange={(e) => setDatetimeColumn(e.target.value)}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-800/80 px-3 py-2 text-zinc-100 placeholder-zinc-500 focus:border-amber-500/60 focus:outline-none focus:ring-1 focus:ring-amber-500/40"
+                title="0-based column index (e.g. 0, 1) or header name if first line is a header"
+              />
+            </div>
+            <div className="flex-1 min-w-[200px] space-y-2">
               <label htmlFor="source" className="block text-sm text-zinc-400">
                 Source name
               </label>
@@ -144,9 +214,11 @@ export default function Home() {
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-800/80 px-3 py-2 text-zinc-100 placeholder-zinc-500 focus:border-amber-500/60 focus:outline-none focus:ring-1 focus:ring-amber-500/40"
               />
             </div>
+          </div>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
             <div className="flex flex-1 flex-col gap-2 sm:flex-[2]">
               <label htmlFor="logs" className="block text-sm text-zinc-400">
-                Paste log lines (first column = ISO date/time)
+                Paste log lines (ISO date/time in the column above)
               </label>
               <textarea
                 id="logs"

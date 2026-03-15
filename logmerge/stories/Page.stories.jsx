@@ -57,6 +57,44 @@ export const SupportsSpaceSeparatedDateTime = {
   },
 };
 
+/** Logs with datetime in column 1 (0-based). Column 0 = label, column 1 = timestamp, column 2 = message. */
+const logLinesColumn1 = `level	2024-03-13T14:00:00.000Z	Later message
+level	2024-03-13T11:00:00.000Z	Earlier message`;
+
+export const UsingColumn1AsDatetime = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    const datetimeColInput = canvas.getByLabelText(/datetime column/i);
+    await userEvent.clear(datetimeColInput);
+    await userEvent.type(datetimeColInput, "1");
+
+    const sourceInput = canvas.getByLabelText(/source name/i);
+    await userEvent.type(sourceInput, "Column1 Source");
+
+    const logsTextarea = canvas.getByLabelText(/paste log lines/i);
+    await userEvent.clear(logsTextarea);
+    await userEvent.type(logsTextarea, logLinesColumn1);
+
+    const addButton = canvas.getByRole("button", { name: /add source/i });
+    await userEvent.click(addButton);
+
+    expect(canvas.getByText(/Merged log \(2 lines\)/i)).toBeTruthy();
+    const rows = canvas.getAllByRole("row");
+    // Header + 2 data rows; earlier (11:00) should be first
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    const table = canvas.getByRole("table");
+    expect(table).toBeTruthy();
+    expect(table.textContent).toMatch(/11:00:00/);
+    expect(table.textContent).toMatch(/14:00:00/);
+    // Earlier message should appear before later in the table (sorted by column 1 datetime)
+    const bodyText = table.textContent;
+    const posEarlier = bodyText.indexOf("Earlier message");
+    const posLater = bodyText.indexOf("Later message");
+    expect(posEarlier).toBeLessThan(posLater);
+  },
+};
+
 const invalidLogLine = `not a timestamp	This line has no valid ISO date at the start`;
 export const ShowsFormatErrorBelowTextarea = {
   play: async ({ canvasElement }) => {
