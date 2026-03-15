@@ -13,6 +13,54 @@ type LogEntry = {
 const ISO_REGEX =
   /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d{3})?(?:Z|[+-]\d{2}:?\d{2})?/;
 
+const ISO_EXAMPLE = "e.g. 2024-03-13T10:00:00.000Z or 2024-03-13 10:00:00.000Z";
+
+export type FormatError = {
+  lineNumber: number;
+  line: string;
+  reason: "missing_timestamp" | "invalid_date";
+};
+
+export function validateLogLines(text: string): FormatError[] {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const errors: FormatError[] = [];
+  lines.forEach((line, i) => {
+    const match = line.match(ISO_REGEX);
+    if (!match) {
+      errors.push({
+        lineNumber: i + 1,
+        line: line.slice(0, 50) + (line.length > 50 ? "…" : ""),
+        reason: "missing_timestamp",
+      });
+      return;
+    }
+    const timestamp = match[0];
+    const time = new Date(timestamp).getTime();
+    if (Number.isNaN(time)) {
+      errors.push({
+        lineNumber: i + 1,
+        line: timestamp,
+        reason: "invalid_date",
+      });
+    }
+  });
+  return errors;
+}
+
+function formatValidationMessage(errors: FormatError[]): string {
+  if (errors.length === 0) return "";
+  return errors
+    .map(
+      (e) =>
+        `Line ${e.lineNumber}: ${
+          e.reason === "missing_timestamp"
+            ? `line must start with ISO date/time (${ISO_EXAMPLE})`
+            : `invalid date: "${e.line}"`
+        }`
+    )
+    .join(" ");
+}
+
 function parseLogLines(text: string, source: string): LogEntry[] {
   const lines = text.split(/\r?\n/).filter((line) => line.trim());
   const entries: LogEntry[] = [];
@@ -45,6 +93,12 @@ export default function Home() {
   const merged = useMemo(() => {
     return [...entries].sort((a, b) => a.time - b.time);
   }, [entries]);
+
+  const formatErrors = useMemo(
+    () => (pastedText.trim() ? validateLogLines(pastedText) : []),
+    [pastedText]
+  );
+  const formatErrorText = formatValidationMessage(formatErrors);
 
   function handleAddSource() {
     const name = sourceName.trim() || `Source ${entries.length + 1}`;
@@ -101,7 +155,17 @@ export default function Home() {
                 value={pastedText}
                 onChange={(e) => setPastedText(e.target.value)}
                 className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-800/80 px-3 py-2 font-mono text-sm text-zinc-100 placeholder-zinc-500 focus:border-amber-500/60 focus:outline-none focus:ring-1 focus:ring-amber-500/40"
+                aria-describedby={formatErrorText ? "log-format-errors" : undefined}
               />
+              {formatErrorText && (
+                <p
+                  id="log-format-errors"
+                  role="alert"
+                  className="text-sm text-amber-400"
+                >
+                  {formatErrorText}
+                </p>
+              )}
             </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">

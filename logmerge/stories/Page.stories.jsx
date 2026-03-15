@@ -56,3 +56,18 @@ export const SupportsSpaceSeparatedDateTime = {
     expect(canvas.getByText("Space Format Source")).toBeTruthy();
   },
 };
+
+const invalidLogLine = `not a timestamp	This line has no valid ISO date at the start`;
+export const ShowsFormatErrorBelowTextarea = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    const logsTextarea = canvas.getByLabelText(/paste log lines/i);
+    await userEvent.clear(logsTextarea);
+    await userEvent.type(logsTextarea, invalidLogLine);
+
+    const errorMessage = canvas.getByRole("alert");
+    expect(errorMessage).toBeTruthy();
+    expect(errorMessage.textContent).toContain("Line 1: line must start with ISO date/time (e.g. 2024-03-13T10:00:00.000Z or 2024-03-13 10:00:00.000Z)");
+  },
+};
