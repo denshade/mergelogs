@@ -35,3 +35,24 @@ export const AddingTwoValidLogLines = {
     expect(canvas.getByText("Test Source")).toBeTruthy();
   },
 };
+
+const logLineSpaceFormat = `2024-03-13 10:00:00.000Z	Log with space-separated datetime`;
+export const SupportsSpaceSeparatedDateTime = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    const sourceInput = canvas.getByLabelText(/source name/i);
+    await userEvent.type(sourceInput, "Space Format Source");
+
+    const logsTextarea = canvas.getByLabelText(/paste log lines/i);
+    await userEvent.clear(logsTextarea);
+    await userEvent.type(logsTextarea, logLineSpaceFormat);
+
+    const addButton = canvas.getByRole("button", { name: /add source/i });
+    await userEvent.click(addButton);
+
+    expect(canvas.getByText(/Merged log \(1 lines?\)/i)).toBeTruthy();
+    expect(canvas.getByText("Log with space-separated datetime")).toBeTruthy();
+    expect(canvas.getByText("Space Format Source")).toBeTruthy();
+  },
+};
