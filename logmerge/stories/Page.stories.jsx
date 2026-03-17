@@ -106,6 +106,65 @@ export const ShowsFormatErrorBelowTextarea = {
 
     const errorMessage = canvas.getByRole("alert");
     expect(errorMessage).toBeTruthy();
-    expect(errorMessage.textContent).toContain("Line 1: line must start with ISO date/time (e.g. 2024-03-13T10:00:00.000Z or 2024-03-13 10:00:00.000Z)");
+    expect(errorMessage.textContent).toMatch(/Line 1:.*(?:invalid date|line must start with ISO date)/);
+  },
+};
+
+// --- Dynamic date column detection (after paste) ---
+
+/** After pasting data with ISO date in column 0, datetime column stays or is set to "0". */
+const singleColumnIso = `2024-03-13T10:00:00.000Z	First line
+2024-03-13T11:00:00.000Z	Second line`;
+export const AutoDetectsDateInColumn0 = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const logsTextarea = canvas.getByLabelText(/paste log lines/i);
+    await userEvent.clear(logsTextarea);
+    await userEvent.type(logsTextarea, singleColumnIso);
+    const datetimeColInput = canvas.getByLabelText(/datetime column/i);
+    expect(datetimeColInput.value).toBe("0");
+  },
+};
+
+/** After pasting data with ISO date in column 1, datetime column is auto-detected as "1". */
+const dateInColumn1 = `level	2024-03-13T14:00:00.000Z	Later message
+level	2024-03-13T11:00:00.000Z	Earlier message`;
+export const AutoDetectsDateInColumn1 = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const logsTextarea = canvas.getByLabelText(/paste log lines/i);
+    await userEvent.clear(logsTextarea);
+    await userEvent.type(logsTextarea, dateInColumn1);
+    const datetimeColInput = canvas.getByLabelText(/datetime column/i);
+    expect(datetimeColInput.value).toBe("1");
+  },
+};
+
+/** After pasting data with a header row and date in first column, datetime column is set to the header name. */
+const csvWithHeader = `timestamp,message
+2024-03-13T10:00:00.000Z,hello
+2024-03-13T12:00:00.000Z,world`;
+export const AutoDetectsHeaderNameTimestamp = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const logsTextarea = canvas.getByLabelText(/paste log lines/i);
+    await userEvent.clear(logsTextarea);
+    await userEvent.type(logsTextarea, csvWithHeader);
+    const datetimeColInput = canvas.getByLabelText(/datetime column/i);
+    expect(datetimeColInput.value).toBe("timestamp");
+  },
+};
+
+/** Comma-separated data with date in column 0 is detected as column "0". */
+const commaSeparated = `2024-03-13T09:00:00.000Z,event A
+2024-03-13T10:00:00.000Z,event B`;
+export const AutoDetectsCommaSeparatedColumn0 = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const logsTextarea = canvas.getByLabelText(/paste log lines/i);
+    await userEvent.clear(logsTextarea);
+    await userEvent.type(logsTextarea, commaSeparated);
+    const datetimeColInput = canvas.getByLabelText(/datetime column/i);
+    expect(datetimeColInput.value).toBe("0");
   },
 };

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 
 type LogEntry = {
   id: string;
@@ -18,6 +18,60 @@ const ISO_EXAMPLE = "e.g. 2024-03-13T10:00:00.000Z or 2024-03-13 10:00:00.000Z";
 /** Split a line into columns (tab or comma separated) */
 function splitColumns(line: string): string[] {
   return line.split(/[\t,]/).map((c) => c.trim());
+}
+
+/** Try to guess which column contains the datetime based on pasted data. */
+function guessDatetimeColumnSpec(lines: string[]): string {
+  if (lines.length === 0) return "0";
+
+  // Take a sample of the first few non-empty lines
+  const sampleLines = lines.filter((l) => l.trim()).slice(0, 20);
+  if (sampleLines.length === 0) return "0";
+
+  const counts: Record<number, number> = {};
+
+  for (const line of sampleLines) {
+    const cols = splitColumns(line);
+    cols.forEach((value, idx) => {
+      if (!value) return;
+      // Prefer strict ISO-style matches
+      if (ISO_REGEX.test(value)) {
+        counts[idx] = (counts[idx] || 0) + 3;
+        return;
+      }
+      // Fallback: anything that Date can parse reasonably
+      const t = new Date(value).getTime();
+      if (!Number.isNaN(t) && value.length >= 8) {
+        counts[idx] = (counts[idx] || 0) + 1;
+      }
+    });
+  }
+
+  const candidateIndices = Object.keys(counts).map((k) => parseInt(k, 10));
+  if (candidateIndices.length === 0) return "0";
+
+  // Pick the column with the highest score
+  let bestIndex = candidateIndices[0];
+  for (const idx of candidateIndices) {
+    if ((counts[idx] || 0) > (counts[bestIndex] || 0)) {
+      bestIndex = idx;
+    }
+  }
+
+  // If the first line looks like a header row (non-date) but the same column
+  // in later lines looks like dates, prefer the header name.
+  const headerCols = splitColumns(sampleLines[0]);
+  const headerVal = headerCols[bestIndex];
+  if (headerVal) {
+    const headerLooksLikeDate =
+      ISO_REGEX.test(headerVal) ||
+      !Number.isNaN(new Date(headerVal).getTime());
+    if (!headerLooksLikeDate) {
+      return headerVal;
+    }
+  }
+
+  return String(bestIndex);
 }
 
 /** Resolve datetime column spec to 0-based index. spec can be "0", "1", or a header name. */
@@ -142,6 +196,21 @@ export default function Home() {
   const [pastedText, setPastedText] = useState("");
   const [datetimeColumn, setDatetimeColumn] = useState("0");
   const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [userEditedDatetimeColumn, setUserEditedDatetimeColumn] =
+    useState(false);
+
+  // When the user pastes new data, try to auto-detect the datetime column
+  // unless they've manually overridden it.
+  useEffect(() => {
+    const text = pastedText.trim();
+    if (!text || userEditedDatetimeColumn) return;
+    const lines = text.split(/\r?\n/).filter((l) => l.trim());
+    if (lines.length === 0) return;
+    const guessed = guessDatetimeColumnSpec(lines);
+    if (guessed && guessed !== datetimeColumn) {
+      setDatetimeColumn(guessed);
+    }
+  }, [pastedText, userEditedDatetimeColumn, datetimeColumn]);
 
   const merged = useMemo(() => {
     return [...entries].sort((a, b) => a.time - b.time);
@@ -196,7 +265,10 @@ export default function Home() {
                 type="text"
                 placeholder="0 or name"
                 value={datetimeColumn}
-                onChange={(e) => setDatetimeColumn(e.target.value)}
+                onChange={(e) => {
+                  setDatetimeColumn(e.target.value);
+                  setUserEditedDatetimeColumn(true);
+                }}
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-800/80 px-3 py-2 text-zinc-100 placeholder-zinc-500 focus:border-amber-500/60 focus:outline-none focus:ring-1 focus:ring-amber-500/40"
                 title="0-based column index (e.g. 0, 1) or header name if first line is a header"
               />
